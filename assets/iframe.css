@@ -1,0 +1,33 @@
+.acf-block-body .acf-block-fields,
+.acf-block-body .acf-block-fields *,
+.acf-block-body .acf-block-fields *::before,
+.acf-block-body .acf-block-fields *::after {
+	box-sizing: border-box;
+}
+
+.acf-block-body .acf-block-fields {
+	margin: 0;
+	border-radius: 4px;
+	overflow: visible;
+}
+
+.acf-block-body .acf-block-fields label,
+.acf-block-body .acf-block-fields .acf-label,
+.acf-block-body .acf-block-fields .description {
+	text-transform: none;
+	letter-spacing: normal;
+}
+
+.acf-block-body .acf-block-fields a {
+	box-shadow: none;
+	text-decoration: none;
+}
+
+.acf-block-body .acf-block-fields img {
+	max-width: 100%;
+	height: auto;
+}
+
+.acf-tooltip {
+	z-index: 900000;
+}

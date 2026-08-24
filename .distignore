@@ -1,0 +1,9 @@
+.git
+.github
+.gitignore
+.distignore
+readme.md
+dist
+*.zip
+.idea
+.vscode

@@ -1,0 +1,324 @@
+<?php
+/**
+ * Plugin Name:       Block Edit Mode for ACF
+ * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
+ * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
+ * Version:           1.0.0
+ * Requires at least: 6.8
+ * Requires PHP:      7.4
+ * Author:            Bakhodir Sharipov
+ * Author URI:        https://github.com/cosmoc0der
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain:       block-edit-mode-for-acf
+ *
+ * @package Block_Edit_Mode_For_ACF
+ */
+
+namespace cosmo\Block_Edit_Mode_For_ACF;
+
+defined( 'ABSPATH' ) || exit;
+
+const VERSION      = '1.0.0';
+const CACHE_DIR    = 'block-edit-mode-for-acf';
+const FAILURE_FLAG = 'block_edit_mode_for_acf_patch_failed';
+
+add_filter( 'script_loader_src', __NAMESPACE__ . '\filter_block_script_src', 10, 2 );
+add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\enqueue_editor_assets', 20 );
+add_action( 'enqueue_block_assets', __NAMESPACE__ . '\enqueue_canvas_assets' );
+add_action( 'admin_notices', __NAMESPACE__ . '\render_failure_notice' );
+
+/**
+ * Whether the patch is enabled.
+ *
+ * Disable completely:
+ *     add_filter( 'cosmo/block_edit_mode_for_acf/enabled', '__return_false' );
+ *
+ * @return bool
+ */
+function is_enabled(): bool {
+	return (bool) apply_filters( 'cosmo/block_edit_mode_for_acf/enabled', true );
+}
+
+/**
+ * URL of a file in this plugin's assets folder.
+ *
+ * @param string $file File name relative to assets/.
+ * @return string
+ */
+function asset_url( string $file ): string {
+	return plugins_url( 'assets/' . $file, __FILE__ );
+}
+
+/**
+ * Replaces the original acf-pro-blocks.min.js with a patched copy.
+ *
+ * @param string $src    The script URL.
+ * @param string $handle The script handle.
+ * @return string
+ */
+function filter_block_script_src( $src, $handle ) {
+	if ( 'acf-blocks' !== $handle || ! is_admin() || ! is_enabled() ) {
+		return $src;
+	}
+
+	$patched = get_patched_script_url();
+
+	return $patched ? $patched : $src;
+}
+
+/**
+ * A regex that locates the "editor inside iframe" check within the ACF build.
+ *
+ * In the source code it looks like this:
+ *     function isBlockEditorIframed() {
+ *         return document.querySelectorAll( 'iframe[name="editor-canvas"]' ).length > 0;
+ *     }
+ *
+ * This is precisely what makes ACF force the block mode to "preview" and hide the
+ * mode-switching button in the toolbar (see the BlockEdit class in acf-pro-blocks).
+ *
+ * @return string
+ */
+function search_pattern(): string {
+	return '~function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(\s*\)\s*\{\s*return\s+document\.querySelectorAll\(\s*'
+		. '([\'"])iframe\[name=\\\\?"editor-canvas\\\\?"\]\2\s*\)\.length\s*>\s*0\s*;?\s*\}~';
+}
+
+/**
+ * Returns the URL of the patched copy of the ACF blocks script, creating it if necessary.
+ *
+ * The copy lives in the uploads directory and its file name is derived from the ACF
+ * version plus the source file's size and modification time, so it regenerates by
+ * itself after an ACF update.
+ *
+ * @return string|false
+ */
+function get_patched_script_url() {
+	static $url = null;
+
+	if ( null !== $url ) {
+		return $url;
+	}
+
+	$url = false;
+
+	if ( ! defined( 'ACF_VERSION' ) || ! function_exists( 'acf_get_path' ) ) {
+		return $url;
+	}
+
+	$min    = defined( 'ACF_DEVELOPMENT_MODE' ) && ACF_DEVELOPMENT_MODE ? '' : '.min';
+	$source = acf_get_path( "assets/build/js/pro/acf-pro-blocks{$min}.js" );
+
+	if ( ! is_readable( $source ) ) {
+		return $url;
+	}
+
+	$uploads = wp_upload_dir();
+
+	if ( ! empty( $uploads['error'] ) ) {
+		return $url;
+	}
+
+	$key      = substr( md5( ACF_VERSION . '|' . VERSION . '|' . filemtime( $source ) . '|' . filesize( $source ) ), 0, 12 );
+	$filename = "acf-pro-blocks-{$key}{$min}.js";
+	$dir      = untrailingslashit( $uploads['basedir'] ) . '/' . CACHE_DIR;
+	$path     = $dir . '/' . $filename;
+	$public   = trailingslashit( $uploads['baseurl'] ) . CACHE_DIR . '/' . $filename;
+
+	if ( file_exists( $path ) ) {
+		$url = $public;
+
+		return $url;
+	}
+
+	$filesystem = filesystem();
+
+	if ( ! $filesystem ) {
+		return $url;
+	}
+
+	$source_js  = $filesystem->get_contents( $source );
+	$patched_js = preg_replace( search_pattern(), 'function $1(){return false}', (string) $source_js, -1, $replaced );
+
+	// The check was not found - most likely ACF rewrote this part of the build.
+	// Silently fall back to the original and warn the administrator in wp-admin.
+	if ( empty( $replaced ) || null === $patched_js ) {
+		set_transient( FAILURE_FLAG, ACF_VERSION, WEEK_IN_SECONDS );
+
+		return $url;
+	}
+
+	if ( ! write_atomic( $filesystem, $dir, $path, $patched_js ) ) {
+		set_transient( FAILURE_FLAG, ACF_VERSION, WEEK_IN_SECONDS );
+
+		return $url;
+	}
+
+	purge_stale_copies( $filesystem, $dir, $filename );
+	delete_transient( FAILURE_FLAG );
+
+	$url = $public;
+
+	return $url;
+}
+
+/**
+ * Initialised WP_Filesystem instance, or false when direct access is unavailable.
+ *
+ * Only the "direct" method is used: any other one would prompt the user for FTP
+ * credentials, which is not acceptable in the middle of rendering the editor.
+ *
+ * @return \WP_Filesystem_Base|false
+ */
+function filesystem() {
+	global $wp_filesystem;
+
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+
+	if ( 'direct' !== get_filesystem_method() ) {
+		return false;
+	}
+
+	if ( ! WP_Filesystem() || ! $wp_filesystem ) {
+		return false;
+	}
+
+	return $wp_filesystem;
+}
+
+/**
+ * Writes the patched build through a temporary file, so that a concurrent request
+ * can never pick up a half-written script.
+ *
+ * @param \WP_Filesystem_Base $filesystem Filesystem instance.
+ * @param string              $dir        Target directory.
+ * @param string              $path       Target file path.
+ * @param string              $contents   File contents.
+ * @return bool
+ */
+function write_atomic( $filesystem, string $dir, string $path, string $contents ): bool {
+	if ( ! $filesystem->is_dir( $dir ) && ! wp_mkdir_p( $dir ) ) {
+		return false;
+	}
+
+	$tmp = $path . '.' . wp_generate_password( 8, false ) . '.tmp';
+
+	if ( ! $filesystem->put_contents( $tmp, $contents, FS_CHMOD_FILE ) ) {
+		return false;
+	}
+
+	if ( ! $filesystem->move( $tmp, $path, true ) ) {
+		$filesystem->delete( $tmp );
+
+		return false;
+	}
+
+	return true;
+}
+
+/**
+ * Removes copies left over from previous ACF versions.
+ *
+ * @param \WP_Filesystem_Base $filesystem Filesystem instance.
+ * @param string              $dir        Cache directory.
+ * @param string              $keep       File name that must be preserved.
+ * @return void
+ */
+function purge_stale_copies( $filesystem, string $dir, string $keep ) {
+	$listing = $filesystem->dirlist( $dir );
+
+	if ( ! is_array( $listing ) ) {
+		return;
+	}
+
+	foreach ( $listing as $name => $item ) {
+		if ( $name === $keep || 'f' !== $item['type'] ) {
+			continue;
+		}
+
+		if ( 1 === preg_match( '~^acf-pro-blocks-[a-f0-9]{12}(\.min)?\.js(\.[A-Za-z0-9]+\.tmp)?$~', $name ) ) {
+			$filesystem->delete( $dir . '/' . $name );
+		}
+	}
+}
+
+/**
+ * Companion script inside the editor itself (the parent document).
+ *
+ * @return void
+ */
+function enqueue_editor_assets() {
+	if ( ! is_enabled() || ! wp_script_is( 'acf-blocks', 'enqueued' ) ) {
+		return;
+	}
+
+	wp_enqueue_script(
+		'block-edit-mode-for-acf',
+		asset_url( 'editor.js' ),
+		array( 'acf-blocks' ),
+		VERSION,
+		true
+	);
+}
+
+/**
+ * ACF field styles inside the canvas iframe.
+ *
+ * WordPress assembles the iframe contents separately (_wp_get_iframed_editor_assets),
+ * running enqueue_block_assets in a "frontend" context; as a result the ACF admin
+ * styles are left out and the block form would render unstyled.
+ *
+ * @return void
+ */
+function enqueue_canvas_assets() {
+	if ( ! is_admin() || ! is_enabled() ) {
+		return;
+	}
+
+	if ( ! wp_style_is( 'acf-input', 'registered' ) ) {
+		return;
+	}
+
+	// .acf-button and other ACF controls rely on the wp-admin button styles.
+	wp_enqueue_style( 'buttons' );
+
+	$acf_style = wp_style_is( 'acf-pro-input', 'registered' ) ? 'acf-pro-input' : 'acf-input';
+	wp_enqueue_style( $acf_style );
+
+	wp_enqueue_style(
+		'block-edit-mode-for-acf',
+		asset_url( 'iframe.css' ),
+		array( $acf_style ),
+		VERSION
+	);
+}
+
+/**
+ * Notifies the administrator when the patch could not be applied after an ACF update.
+ *
+ * @return void
+ */
+function render_failure_notice() {
+	if ( ! is_enabled() || ! current_user_can( 'activate_plugins' ) ) {
+		return;
+	}
+
+	$version = get_transient( FAILURE_FLAG );
+
+	if ( ! $version ) {
+		return;
+	}
+
+	printf(
+		'<div class="notice notice-warning"><p><strong>%1$s</strong> %2$s</p></div>',
+		esc_html__( 'Block Edit Mode for ACF:', 'block-edit-mode-for-acf' ),
+		esc_html(
+			sprintf(
+				/* translators: %s: ACF version number. */
+				__( 'Could not patch the ACF blocks bundle (version %s) - it looks like ACF has changed that part of its code. Blocks will keep opening in preview mode with the fields in the sidebar until the plugin is updated.', 'block-edit-mode-for-acf' ),
+				$version
+			)
+		)
+	);
+}
