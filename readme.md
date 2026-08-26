@@ -35,11 +35,22 @@ passed; now it always does. ACF exposes neither a filter nor a setting for it.
 2. **Styles the form inside the iframe.** The canvas iframe is assembled by
    `_wp_get_iframed_editor_assets()` in a "frontend" context, so it has no
    `common.css` / `forms.css` from wp-admin. `assets/iframe.css` plus
-   `acf-pro-input` and `buttons` are enqueued through `enqueue_block_assets`.
+   `acf-pro-input`, `buttons`, `editor-buttons` and the TinyMCE skin are
+   enqueued through `enqueue_block_assets`.
 3. **Fixes cross-document glitches** (`assets/editor.js`): the `wp-core-ui`
    class on the canvas `<html>` (button styles key off it), `dropdownParent`
    for select2, and relocating tooltips — the repeater row delete confirmation —
    into the iframe document.
+4. **Revives the WYSIWYG field** (`assets/editor.js`). TinyMCE and Quicktags run
+   in the parent document and resolve the editor by id there, so a textarea in
+   the canvas is invisible to them: `quicktags()` is a constructor, so its
+   `return false` still hands back an object — one without `settings` — and ACF's
+   `buildQuicktags()` dies on `settings.buttons`, while `tinymce.init()` resolves
+   its `selector` against the wrong document and initialises nothing. The plugin
+   lets `document.getElementById()` fall back to the canvas documents, passes
+   TinyMCE the textarea as `target` instead of a selector, and re-delegates the
+   Visual/Text tabs and the Add Media button — both bound to the parent
+   `document` by core — onto the canvas document.
 
 ## Install
 
@@ -59,8 +70,9 @@ and its transient. Deactivating alone leaves them in place.
 
 ## Worth re-testing after ACF or WordPress updates
 
-A block containing a repeater, a select / post_object and an image — the fields
-that pull in select2 positioning, the media modal and tooltips.
+A block containing a repeater, a select / post_object, an image and a WYSIWYG
+(with *Delay initialization* on) — the fields that pull in select2 positioning,
+the media modal, tooltips and TinyMCE.
 
 ## License
 

@@ -7,8 +7,8 @@
  *
  * The fields themselves work fine: ACF attaches event handlers to the field's
  * `$el` rather than the `document`, so cross-document events do not interfere.
- * What needs fixing are elements that rely on coordinates or the parent
- * document's admin classes.
+ * What needs fixing are elements that rely on coordinates, on the parent
+ * document's admin classes, or on looking themselves up by id in `document`.
  */
 ( function ( $ ) {
 	'use strict';
@@ -17,6 +17,12 @@
 		return;
 	}
 
+	/**
+	 * Canvas documents that currently hold an ACF form.
+	 *
+	 * @type {Document[]}
+	 */
+	var canvases = [];
 
 	/**
 	 * The iframe document, if the element is not located in the main document.
@@ -35,6 +41,28 @@
 	}
 
 	/**
+	 * Registers a canvas document and binds the handlers that WordPress itself
+	 * delegates from the parent `document` (or `document.body`), and which
+	 * therefore never see a click made inside the iframe.
+	 *
+	 * @param {Document} doc
+	 * @return {void}
+	 */
+	function trackCanvas( doc ) {
+		if ( ! doc || -1 !== canvases.indexOf( doc ) ) {
+			return;
+		}
+
+		canvases.push( doc );
+
+		// wp-admin/js/editor.js binds these to the parent document.
+		$( doc ).on( 'click', '.wp-switch-editor', onSwitchEditor );
+
+		// wp-includes/js/media-editor.js binds this to the parent body.
+		$( doc ).on( 'click', '.insert-media', onInsertMedia );
+	}
+
+	/**
 	 * ACF buttons (.acf-button.button) rely on wp-admin styles attached to .wp-core-ui.
 	 * The iframe lacks this class—React renders the body there (overwriting any
 	 * added class)—so we tag the <html> element instead; as an ancestor, it
@@ -43,9 +71,15 @@
 	function markCanvas( $el ) {
 		var doc = foreignDocument( $el );
 
-		if ( doc && doc.documentElement ) {
+		if ( ! doc ) {
+			return;
+		}
+
+		if ( doc.documentElement ) {
 			doc.documentElement.classList.add( 'wp-core-ui' );
 		}
+
+		trackCanvas( doc );
 	}
 
 	acf.addAction( 'append', markCanvas );
@@ -94,4 +128,135 @@
 
 		return tooltip;
 	};
+
+	/**
+	 * The WYSIWYG field.
+	 *
+	 * TinyMCE, Quicktags and the Visual/Text switcher all run in the parent
+	 * document and resolve the editor by id through document.getElementById().
+	 * For a textarea living in the canvas those lookups return null, and none of
+	 * that code handles the miss:
+	 *
+	 *   - quicktags() is a constructor, so its `return false` still yields an
+	 *     object—one with no `settings`—and ACF's buildQuicktags() dies on
+	 *     "Cannot read properties of undefined (reading 'buttons')";
+	 *   - tinymce.init() resolves "#id" with querySelectorAll() on the parent
+	 *     document, finds nothing and silently initialises no editor.
+	 *
+	 * The field is then left as the bare textarea underneath the (already
+	 * removed) "Click to initialize TinyMCE" placeholder.
+	 *
+	 * Two adjustments are enough: let id lookups in the parent document fall
+	 * back to the canvas documents, and hand TinyMCE the textarea element
+	 * itself instead of a selector it would run against the wrong document.
+	 */
+	var lookupPatched = false;
+
+	/**
+	 * Makes document.getElementById() fall back to the canvas documents.
+	 *
+	 * The patch is purely additive—it only ever resolves ids that the parent
+	 * document does not have—and is installed lazily, on the first editor that
+	 * is actually initialised inside a canvas.
+	 *
+	 * @return {void}
+	 */
+	function patchLookup() {
+		if ( lookupPatched ) {
+			return;
+		}
+
+		lookupPatched = true;
+
+		var getElementById = document.getElementById;
+
+		document.getElementById = function ( id ) {
+			var el = getElementById.call( document, id );
+
+			for ( var i = 0; ! el && i < canvases.length; i++ ) {
+				// Skip documents whose iframe has already been torn down.
+				if ( canvases[ i ].defaultView ) {
+					el = canvases[ i ].getElementById( id );
+				}
+			}
+
+			return el;
+		};
+	}
+
+	if ( acf.tinymce ) {
+		var initializeEditor = acf.tinymce.initialize;
+
+		acf.tinymce.initialize = function ( id, args ) {
+			var field = args && args.field;
+			var doc = field ? foreignDocument( field.$el ) : null;
+
+			if ( doc ) {
+				trackCanvas( doc );
+				patchLookup();
+			}
+
+			return initializeEditor.apply( this, arguments );
+		};
+	}
+
+	acf.addFilter( 'wysiwyg_tinymce_settings', function ( settings, id, field ) {
+		if ( ! field || ! foreignDocument( field.$el ) ) {
+			return settings;
+		}
+
+		var textarea = field.$input()[ 0 ];
+
+		if ( textarea ) {
+			// tinymce.init() prefers `selector` over `target`, so it has to go.
+			settings.target = textarea;
+			delete settings.selector;
+		}
+
+		return settings;
+	} );
+
+	/**
+	 * Visual/Text tabs.
+	 *
+	 * @param {Event} e
+	 * @return {void}
+	 */
+	function onSwitchEditor( e ) {
+		var $button = $( this );
+		var id = $button.attr( 'data-wp-editor-id' );
+
+		if ( ! id || ! acf.isset( window, 'switchEditors', 'go' ) ) {
+			return;
+		}
+
+		window.switchEditors.go( id, $button.hasClass( 'switch-tmce' ) ? 'tmce' : 'html' );
+	}
+
+	/**
+	 * The "Add Media" button of a WYSIWYG field. The modal itself belongs to the
+	 * parent document, which is exactly where wp.media puts it.
+	 *
+	 * @param {Event} e
+	 * @return {void}
+	 */
+	function onInsertMedia( e ) {
+		var $button = $( this );
+
+		if ( ! acf.isset( window, 'wp', 'media', 'editor', 'open' ) ) {
+			return;
+		}
+
+		e.preventDefault();
+
+		var gallery = $button.hasClass( 'gallery' );
+		var l10n = acf.isset( window, 'wp', 'media', 'view', 'l10n' ) ? wp.media.view.l10n : {};
+
+		wp.media.editor.open( $button.attr( 'data-editor' ), {
+			frame: 'post',
+			state: gallery ? 'gallery' : 'insert',
+			title: gallery ? l10n.createGalleryTitle : l10n.addMedia,
+			multiple: true,
+		} );
+	}
 } )( jQuery );

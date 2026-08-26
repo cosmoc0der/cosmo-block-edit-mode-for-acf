@@ -3,7 +3,7 @@
  * Plugin Name:       Block Edit Mode for ACF
  * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
  * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 6.8
  * Requires PHP:      7.4
  * Author:            Bakhodir Sharipov
@@ -19,7 +19,7 @@ namespace cosmo\Block_Edit_Mode_For_ACF;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION      = '1.0.0';
+const VERSION      = '1.0.1';
 const CACHE_DIR    = 'block-edit-mode-for-acf';
 const FAILURE_FLAG = 'block_edit_mode_for_acf_patch_failed';
 
@@ -283,6 +283,8 @@ function enqueue_canvas_assets() {
 	// .acf-button and other ACF controls rely on the wp-admin button styles.
 	wp_enqueue_style( 'buttons' );
 
+	enqueue_editor_styles();
+
 	$acf_style = wp_style_is( 'acf-pro-input', 'registered' ) ? 'acf-pro-input' : 'acf-input';
 	wp_enqueue_style( $acf_style );
 
@@ -292,6 +294,42 @@ function enqueue_canvas_assets() {
 		array( $acf_style ),
 		VERSION
 	);
+}
+
+/**
+ * TinyMCE and Quicktags styles for the WYSIWYG field.
+ *
+ * Both toolbars are built by scripts running in the parent document, so their
+ * stylesheets end up in the parent <head> while the markup they produce is
+ * inserted into the canvas. TinyMCE loads its skin itself, which is why there
+ * is no core handle for it and we register our own.
+ *
+ * @return void
+ */
+function enqueue_editor_styles() {
+	if ( wp_style_is( 'editor-buttons', 'registered' ) ) {
+		wp_enqueue_style( 'editor-buttons' );
+	}
+
+	$suffix = defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min';
+
+	/**
+	 * Filters the URL of the TinyMCE skin loaded inside the canvas.
+	 *
+	 * Only needed when the skin has been swapped through tiny_mce_before_init.
+	 *
+	 * @param string $url Stylesheet URL.
+	 */
+	$skin = apply_filters(
+		'cosmo/block_edit_mode_for_acf/tinymce_skin_url',
+		includes_url( "js/tinymce/skins/lightgray/skin{$suffix}.css" )
+	);
+
+	if ( ! $skin ) {
+		return;
+	}
+
+	wp_enqueue_style( 'block-edit-mode-for-acf-tinymce', $skin, array(), get_bloginfo( 'version' ) );
 }
 
 /**

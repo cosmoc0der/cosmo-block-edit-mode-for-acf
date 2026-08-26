@@ -4,7 +4,7 @@ Tags: block editor, gutenberg, custom fields, blocks, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -22,7 +22,7 @@ The plugin builds a patched copy of the ACF blocks script on the fly. The only c
 
 If a future ACF release rewrites that part of the code, the plugin silently serves the untouched original and shows a warning in the admin area. Your site never breaks - it simply falls back to the current ACF behaviour.
 
-Some extra styling and a small companion script are loaded inside the canvas iframe, because the iframe does not inherit the wp-admin stylesheets that ACF fields depend on. These also fix select2 dropdown positioning and tooltip placement across the document boundary.
+Some extra styling and a small companion script are loaded inside the canvas iframe, because the iframe does not inherit the wp-admin stylesheets that ACF fields depend on. These also fix everything that breaks once a field lives in a different document than the scripts driving it: select2 dropdown positioning, tooltip placement, and the WYSIWYG field - TinyMCE, Quicktags, the Visual/Text tabs and the Add Media button.
 
 = Requirements =
 
@@ -62,6 +62,11 @@ No. ACF blocks are a PRO-only feature, so there is nothing to patch in the free 
 Nothing. Deleting the plugin removes the generated cache folder in `wp-content/uploads/` and the internal flag it uses.
 
 == Changelog ==
+
+= 1.0.1 =
+* Fixed the WYSIWYG field never initialising inside the canvas. TinyMCE and Quicktags look their textarea up by id in the parent document, where it no longer is: Quicktags threw "Cannot read properties of undefined (reading 'buttons')" and TinyMCE silently attached to nothing, leaving the field as a plain textarea.
+* Fixed the Visual/Text tabs and the Add Media button of a WYSIWYG field doing nothing - WordPress delegates both from the parent document, which never sees a click made inside the canvas.
+* Added the TinyMCE skin and the editor button styles to the canvas, so the editor toolbars are no longer unstyled.
 
 = 1.0.0 =
 * Initial release.
