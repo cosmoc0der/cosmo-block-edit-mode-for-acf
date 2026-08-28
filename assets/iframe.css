@@ -31,3 +31,37 @@
 .acf-tooltip {
 	z-index: 900000;
 }
+
+.acf-block-body .acf-block-fields,
+.select2-container,
+.select2-container .select2-selection__rendered,
+.select2-container .select2-search__field,
+.select2-container .select2-results__option {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+	font-size: 13px;
+	font-style: normal;
+	font-weight: 400;
+	line-height: 1.4;
+	letter-spacing: normal;
+	color: #1d2327;
+}
+
+.acf-block-body .acf-block-fields p,
+.acf-block-body .acf-block-fields li,
+.acf-block-body .acf-block-fields a,
+.acf-block-body .acf-block-fields span,
+.acf-block-body .acf-block-fields label,
+.acf-block-body .acf-block-fields button {
+	font-family: inherit;
+	font-style: inherit;
+	letter-spacing: normal;
+}
+
+.acf-block-body .acf-block-fields input,
+.acf-block-body .acf-block-fields select,
+.acf-block-body .acf-block-fields textarea {
+	font-family: inherit;
+	font-size: 14px;
+	line-height: 1.4;
+	letter-spacing: normal;
+}

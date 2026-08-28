@@ -105,9 +105,10 @@
 	} );
 
 	/**
-	 * Auto-focusing the search box of an open dropdown.
+	 * Auto-focusing the search box of an open dropdown, plus the two corrections
+	 * Select2 needs once its dropdown lives in a canvas document.
 	 *
-	 * ACF does that on `select2:open` through
+	 * The focusing part: ACF does that on `select2:open` through
 	 * $( '.select2-container--open .select2-search__field' ).get( -1 ).focus() - a
 	 * lookup in the parent document only. The dropdown of a field living in the
 	 * canvas is not there, so the lookup yields undefined and .focus() throws.
@@ -135,6 +136,12 @@
 			return;
 		}
 
+		var $select = $( e.target );
+		var select2 = $select.data( 'select2' );
+
+		adoptDropdown( select2, doc );
+		followCanvas( select2, $select );
+
 		// The dropdown is appended to the end of <body>, so it is the last match;
 		// an earlier one would be the search box of a multi-select field itself.
 		var $search = $( doc ).find(
@@ -143,6 +150,189 @@
 
 		$search.last().trigger( 'focus' );
 	}
+
+	/**
+	 * Hands the open dropdown over to the document the field is currently in.
+	 *
+	 * Select2 has already appended and positioned the list by the time the
+	 * `select2:open` DOM event fires - the internal `open` listeners run first (see
+	 * Observable.trigger, which invokes the named listeners before the '*' relay
+	 * that produces the DOM event) - so both corrections happen after the fact.
+	 *
+	 * What has to be corrected:
+	 *
+	 *   - AttachBody stores `dropdownParent` once, in its constructor. A form that
+	 *     is rebuilt in another document keeps pointing at the <body> it was born
+	 *     with, and drops its list into a document the field no longer belongs to.
+	 *   - _positionDropdown() measures the viewport through `$( window )`, which is
+	 *     always the parent window, while the offsets it compares against come from
+	 *     the iframe. The "is there room below?" test is answered for the wrong
+	 *     scroll position, so the list flips above the field for no reason.
+	 *
+	 * @param {Object|undefined} select2 Select2 instance, as stored on the <select>.
+	 * @param {Document}         doc     Document the field currently lives in.
+	 * @return {void}
+	 */
+	function adoptDropdown( select2, doc ) {
+		var dropdown = select2 && select2.dropdown;
+
+		// Not the AttachBody adapter - there is no detached list to correct.
+		if ( ! dropdown || ! dropdown.$dropdownContainer || ! dropdown.$dropdownParent ) {
+			return;
+		}
+
+		if (
+			dropdown.$dropdownParent.length &&
+			dropdown.$dropdownParent[ 0 ].ownerDocument !== doc
+		) {
+			dropdown.$dropdownParent = $( doc.body );
+			dropdown.$dropdownContainer.appendTo( dropdown.$dropdownParent );
+		}
+
+		// An own property, so only this field's adapter is affected; Select2 keeps
+		// calling it on results:all, results:append, select and unselect.
+		dropdown._positionDropdown = positionDropdown;
+
+		dropdown._positionDropdown();
+		dropdown._resizeDropdown();
+	}
+
+	/**
+	 * Keeps the list under its field while the canvas scrolls.
+	 *
+	 * AttachBody repositions on scroll and resize of `window` - the parent one -
+	 * and freezes whichever scrollable ancestors it can see. Neither reaches the
+	 * canvas: it scrolls its own <html>, which has plain `overflow: visible` and so
+	 * is not recognised as scrollable, and its window is not the one being watched.
+	 * A list opened there would simply stay put while the field scrolled away from
+	 * underneath it.
+	 *
+	 * @param {Object|undefined} select2 Select2 instance, as stored on the <select>.
+	 * @param {jQuery}           $select The field's <select>.
+	 * @return {void}
+	 */
+	function followCanvas( select2, $select ) {
+		var dropdown = select2 && select2.dropdown;
+		var parent = dropdown && dropdown.$dropdownParent && dropdown.$dropdownParent[ 0 ];
+		var view = parent && parent.ownerDocument && parent.ownerDocument.defaultView;
+
+		if ( ! view || view === window ) {
+			return;
+		}
+
+		// Per field, so that closing one list cannot unbind another's handler.
+		var ns = '.cosmoBlockEditMode' + String( select2.id ).replace( /\W/g, '' );
+		var $view = $( view );
+
+		$view.off( ns ).on( 'scroll' + ns + ' resize' + ns, function () {
+			dropdown._positionDropdown();
+			dropdown._resizeDropdown();
+		} );
+
+		$select.one( 'select2:close', function () {
+			$view.off( ns );
+		} );
+	}
+
+	/**
+	 * AttachBody.prototype._positionDropdown(), measuring the viewport in the
+	 * document the dropdown was placed in rather than in the parent one.
+	 *
+	 * @this {Object} The AttachBody-decorated dropdown adapter.
+	 * @return {void}
+	 */
+	function positionDropdown() {
+		var parent = this.$dropdownParent[ 0 ];
+		var view = parent && parent.ownerDocument && parent.ownerDocument.defaultView;
+
+		if ( ! view ) {
+			return;
+		}
+
+		var $view = $( view );
+		var isAbove = this.$dropdown.hasClass( 'select2-dropdown--above' );
+		var isBelow = this.$dropdown.hasClass( 'select2-dropdown--below' );
+		var offset = this.$container.offset();
+		var containerHeight = this.$container.outerHeight( false );
+		var dropdownHeight = this.$dropdown.outerHeight( false );
+		var viewportTop = $view.scrollTop();
+		var viewportBottom = viewportTop + $view.height();
+		var roomAbove = viewportTop < offset.top - dropdownHeight;
+		var roomBelow =
+				viewportBottom > offset.top + containerHeight + dropdownHeight;
+		var direction = null;
+
+		// A statically positioned parent does not anchor the absolute list itself;
+		// the offsets to subtract are then its own offset parent's.
+		var $offsetParent = this.$dropdownParent;
+
+		if ( 'static' === $offsetParent.css( 'position' ) ) {
+			$offsetParent = $offsetParent.offsetParent();
+		}
+
+		var parentOffset = ( $offsetParent.length && $offsetParent.offset() ) || {
+			top: 0,
+			left: 0,
+		};
+
+		if ( ! isAbove && ! isBelow ) {
+			direction = 'below';
+		}
+
+		if ( ! roomBelow && roomAbove && ! isAbove ) {
+			direction = 'above';
+		} else if ( ! roomAbove && roomBelow && isAbove ) {
+			direction = 'below';
+		}
+
+		var css = {
+			left: offset.left - parentOffset.left,
+			top: offset.top + containerHeight - parentOffset.top,
+		};
+
+		if ( 'above' === direction || ( isAbove && 'below' !== direction ) ) {
+			css.top = offset.top - parentOffset.top - dropdownHeight;
+		}
+
+		if ( direction ) {
+			this.$dropdown
+				.removeClass( 'select2-dropdown--below select2-dropdown--above' )
+				.addClass( 'select2-dropdown--' + direction );
+			this.$container
+				.removeClass( 'select2-container--below select2-container--above' )
+				.addClass( 'select2-container--' + direction );
+		}
+
+		this.$dropdownContainer.css( css );
+	}
+
+	/**
+	 * Closing the lists of a form that is going away.
+	 *
+	 * ACF destroys Select2 from onRemove(), which only the `remove` action reaches.
+	 * A block form is not removed, it is unmounted - React simply drops the node -
+	 * and the dropdown container does not live inside that node but at the end of
+	 * <body>. An open list would therefore be left behind, floating over the canvas
+	 * with nothing under it.
+	 *
+	 * @param {jQuery} $el The form being unmounted.
+	 * @return {void}
+	 */
+	function closeSelect2( $el ) {
+		if ( ! foreignDocument( $el ) ) {
+			return;
+		}
+
+		$el.find( 'select' ).each( function () {
+			var select2 = $( this ).data( 'select2' );
+
+			if ( select2 && 'function' === typeof select2.close ) {
+				select2.close();
+			}
+		} );
+	}
+
+	acf.addAction( 'unmount', closeSelect2 );
 
 	/**
 	 * Tooltips and deletion confirmations ("Are you sure?" for repeater rows)
