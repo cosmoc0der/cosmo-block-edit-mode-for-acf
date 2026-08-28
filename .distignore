@@ -1,6 +1,7 @@
 .git
 .github
 .gitignore
+.gitattributes
 .distignore
 readme.md
 dist

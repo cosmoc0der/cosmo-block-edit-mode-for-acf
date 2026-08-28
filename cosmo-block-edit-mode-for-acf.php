@@ -1,27 +1,27 @@
 <?php
 /**
- * Plugin Name:       Block Edit Mode for ACF
+ * Plugin Name:       Cosmo Block Edit Mode for ACF
  * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
  * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
- * Version:           1.0.1
+ * Version:           1.0.2
  * Requires at least: 6.8
  * Requires PHP:      7.4
  * Author:            Bakhodir Sharipov
  * Author URI:        https://github.com/cosmoc0der
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:       block-edit-mode-for-acf
+ * Text Domain:       cosmo-block-edit-mode-for-acf
  *
- * @package Block_Edit_Mode_For_ACF
+ * @package Cosmo_Block_Edit_Mode_For_ACF
  */
 
 namespace cosmo\Block_Edit_Mode_For_ACF;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION      = '1.0.1';
-const CACHE_DIR    = 'block-edit-mode-for-acf';
-const FAILURE_FLAG = 'block_edit_mode_for_acf_patch_failed';
+const VERSION      = '1.0.2';
+const CACHE_DIR    = 'cosmo-block-edit-mode-for-acf';
+const FAILURE_FLAG = 'cosmo_block_edit_mode_for_acf_patch_failed';
 
 add_filter( 'script_loader_src', __NAMESPACE__ . '\filter_block_script_src', 10, 2 );
 add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\enqueue_editor_assets', 20 );
@@ -48,6 +48,22 @@ function is_enabled(): bool {
  */
 function asset_url( string $file ): string {
 	return plugins_url( 'assets/' . $file, __FILE__ );
+}
+
+/**
+ * Whether ACF serves its unminified builds.
+ *
+ * Both constant names are checked: ACF uses ACF_DEVELOPMENT_MODE, its
+ * WordPress.org fork (Secure Custom Fields) uses SCF_DEVELOPMENT_MODE.
+ *
+ * @return bool
+ */
+function is_development_mode(): bool {
+	if ( defined( 'ACF_DEVELOPMENT_MODE' ) && ACF_DEVELOPMENT_MODE ) {
+		return true;
+	}
+
+	return defined( 'SCF_DEVELOPMENT_MODE' ) && SCF_DEVELOPMENT_MODE;
 }
 
 /**
@@ -107,7 +123,7 @@ function get_patched_script_url() {
 		return $url;
 	}
 
-	$min    = defined( 'ACF_DEVELOPMENT_MODE' ) && ACF_DEVELOPMENT_MODE ? '' : '.min';
+	$min    = is_development_mode() ? '' : '.min';
 	$source = acf_get_path( "assets/build/js/pro/acf-pro-blocks{$min}.js" );
 
 	if ( ! is_readable( $source ) ) {
@@ -254,7 +270,7 @@ function enqueue_editor_assets() {
 	}
 
 	wp_enqueue_script(
-		'block-edit-mode-for-acf',
+		'cosmo-block-edit-mode-for-acf',
 		asset_url( 'editor.js' ),
 		array( 'acf-blocks' ),
 		VERSION,
@@ -288,12 +304,72 @@ function enqueue_canvas_assets() {
 	$acf_style = wp_style_is( 'acf-pro-input', 'registered' ) ? 'acf-pro-input' : 'acf-input';
 	wp_enqueue_style( $acf_style );
 
+	$deps    = array( $acf_style );
+	$select2 = enqueue_select2_style();
+
+	if ( $select2 ) {
+		$deps[] = $select2;
+	}
+
 	wp_enqueue_style(
-		'block-edit-mode-for-acf',
+		'cosmo-block-edit-mode-for-acf',
 		asset_url( 'iframe.css' ),
-		array( $acf_style ),
+		$deps,
 		VERSION
 	);
+}
+
+/**
+ * The Select2 stylesheet, used by select, post_object, taxonomy, user and page_link.
+ *
+ * ACF enqueues it from the select field's input_admin_enqueue_scripts(), which runs
+ * on admin_enqueue_scripts - long after WordPress has collected the canvas assets
+ * (get_block_editor_settings() is called before admin-header.php is loaded). The
+ * handle is therefore not even registered yet at this point, so the URL is resolved
+ * exactly the way ACF resolves it.
+ *
+ * Without the stylesheet the original <select> is never hidden and the Select2
+ * markup next to it stays unstyled, which is what a post_object field inside the
+ * canvas looked like.
+ *
+ * @return string Style handle, or an empty string when Select2 is not in play.
+ */
+function enqueue_select2_style(): string {
+	if ( wp_style_is( 'select2', 'registered' ) ) {
+		wp_enqueue_style( 'select2' );
+
+		return 'select2';
+	}
+
+	if ( ! function_exists( 'acf_get_setting' ) || ! function_exists( 'acf_get_url' ) ) {
+		return '';
+	}
+
+	if ( ! acf_get_setting( 'enqueue_select2' ) ) {
+		return '';
+	}
+
+	global $wp_scripts;
+
+	$major = (int) acf_get_setting( 'select2_version' );
+
+	// A third-party Select2 already on the page decides which version ACF talks to.
+	if ( isset( $wp_scripts->registered['select2'] ) ) {
+		$major = (int) $wp_scripts->registered['select2']->ver;
+	}
+
+	if ( 3 === $major ) {
+		$src     = acf_get_url( 'assets/inc/select2/3/select2.css' );
+		$version = '3.5.2';
+	} else {
+		$min     = is_development_mode() ? '' : '.min';
+		$src     = acf_get_url( "assets/inc/select2/4/select2{$min}.css" );
+		$version = '4.0.13';
+	}
+
+	wp_enqueue_style( 'select2', $src, array(), $version );
+
+	return 'select2';
 }
 
 /**
@@ -329,7 +405,7 @@ function enqueue_editor_styles() {
 		return;
 	}
 
-	wp_enqueue_style( 'block-edit-mode-for-acf-tinymce', $skin, array(), get_bloginfo( 'version' ) );
+	wp_enqueue_style( 'cosmo-block-edit-mode-for-acf-tinymce', $skin, array(), get_bloginfo( 'version' ) );
 }
 
 /**
@@ -350,11 +426,11 @@ function render_failure_notice() {
 
 	printf(
 		'<div class="notice notice-warning"><p><strong>%1$s</strong> %2$s</p></div>',
-		esc_html__( 'Block Edit Mode for ACF:', 'block-edit-mode-for-acf' ),
+		esc_html__( 'Cosmo Block Edit Mode for ACF:', 'cosmo-block-edit-mode-for-acf' ),
 		esc_html(
 			sprintf(
 				/* translators: %s: ACF version number. */
-				__( 'Could not patch the ACF blocks bundle (version %s) - it looks like ACF has changed that part of its code. Blocks will keep opening in preview mode with the fields in the sidebar until the plugin is updated.', 'block-edit-mode-for-acf' ),
+				__( 'Could not patch the ACF blocks bundle (version %s) - it looks like ACF has changed that part of its code. Blocks will keep opening in preview mode with the fields in the sidebar until the plugin is updated.', 'cosmo-block-edit-mode-for-acf' ),
 				$version
 			)
 		)

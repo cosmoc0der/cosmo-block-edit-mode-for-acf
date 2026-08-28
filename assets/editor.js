@@ -96,10 +96,53 @@
 
 		if ( doc && doc.body ) {
 			args.dropdownParent = $( doc.body );
+
+			// Must be bound here, and only once per field - see onSelect2Open().
+			$select.off( 'select2:open', onSelect2Open ).on( 'select2:open', onSelect2Open );
 		}
 
 		return args;
 	} );
+
+	/**
+	 * Auto-focusing the search box of an open dropdown.
+	 *
+	 * ACF does that on `select2:open` through
+	 * $( '.select2-container--open .select2-search__field' ).get( -1 ).focus() - a
+	 * lookup in the parent document only. The dropdown of a field living in the
+	 * canvas is not there, so the lookup yields undefined and .focus() throws.
+	 *
+	 * The exception lands in the middle of Select2's own `query` handler, right
+	 * after it announces the open dropdown and before it asks the data adapter for
+	 * results - so the request is never made. An AJAX-driven field (post_object,
+	 * taxonomy, user, page_link, a select with a custom query) is left hanging on
+	 * "Searching..." forever, and a plain one never receives its options.
+	 *
+	 * ACF binds its handler in Select2_4.initialize(), immediately after the
+	 * `select2_args` filter has run; binding ours from that filter therefore puts it
+	 * first in the queue, and stopping the event right there keeps the broken
+	 * handler from ever running.
+	 *
+	 * @param {Event} e
+	 * @return {void}
+	 */
+	function onSelect2Open( e ) {
+		e.stopImmediatePropagation();
+
+		var doc = e.target.ownerDocument;
+
+		if ( ! doc ) {
+			return;
+		}
+
+		// The dropdown is appended to the end of <body>, so it is the last match;
+		// an earlier one would be the search box of a multi-select field itself.
+		var $search = $( doc ).find(
+			'.select2-container--open .select2-search__field'
+		);
+
+		$search.last().trigger( 'focus' );
+	}
 
 	/**
 	 * Tooltips and deletion confirmations ("Are you sure?" for repeater rows)

@@ -2,12 +2,12 @@
 /**
  * Uninstall routine: drops the generated script cache and the failure flag.
  *
- * @package Block_Edit_Mode_For_ACF
+ * @package Cosmo_Block_Edit_Mode_For_ACF
  */
 
 defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
-delete_transient( 'block_edit_mode_for_acf_patch_failed' );
+delete_transient( 'cosmo_block_edit_mode_for_acf_patch_failed' );
 
 $uploads = wp_upload_dir();
 
@@ -15,7 +15,7 @@ if ( ! empty( $uploads['error'] ) || empty( $uploads['basedir'] ) ) {
 	return;
 }
 
-$cache_dir = untrailingslashit( $uploads['basedir'] ) . '/block-edit-mode-for-acf';
+$cache_dir = untrailingslashit( $uploads['basedir'] ) . '/cosmo-block-edit-mode-for-acf';
 
 if ( ! is_dir( $cache_dir ) ) {
 	return;
