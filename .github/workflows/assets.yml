@@ -1,4 +1,4 @@
-﻿name: Update assets
+name: Update assets
 
 on:
   push:
@@ -19,3 +19,4 @@ jobs:
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
           SLUG: cosmo-block-edit-mode-for-acf
+          IGNORE_OTHER_FILES: true
