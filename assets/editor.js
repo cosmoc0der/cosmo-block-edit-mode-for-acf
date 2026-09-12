@@ -417,6 +417,33 @@
 		};
 	}
 
+	/**
+	 * Protect TinyMCE selection logic inside iframe canvases.
+	 * When the editor is rendered inside an iframe, window.getSelection() can return null,
+	 * causing wp-tinymce.js to throw "Cannot read properties of null (reading 'setBaseAndExtent')".
+	 */
+	function patchTinyMCESelection() {
+		if ( window.tinymce && window.tinymce.dom && window.tinymce.dom.Selection ) {
+			if ( ! window.tinymce.dom.Selection.prototype._cosmoSelectPatched ) {
+				var origSelect = window.tinymce.dom.Selection.prototype.select;
+				window.tinymce.dom.Selection.prototype.select = function ( node, content ) {
+					try {
+						var win = this.getWin();
+						if ( ! win || ! win.getSelection || ! win.getSelection() ) {
+							return;
+						}
+						return origSelect.apply( this, arguments );
+					} catch ( err ) {
+						return;
+					}
+				};
+				window.tinymce.dom.Selection.prototype._cosmoSelectPatched = true;
+			}
+		}
+	}
+
+	patchTinyMCESelection();
+
 	if ( acf.tinymce ) {
 		var initializeEditor = acf.tinymce.initialize;
 
@@ -427,6 +454,7 @@
 			if ( doc ) {
 				trackCanvas( doc );
 				patchLookup();
+				patchTinyMCESelection();
 			}
 
 			return initializeEditor.apply( this, arguments );
@@ -456,6 +484,8 @@
 	 * @return {void}
 	 */
 	function onSwitchEditor( e ) {
+		e.preventDefault();
+
 		var $button = $( this );
 		var id = $button.attr( 'data-wp-editor-id' );
 
@@ -463,7 +493,11 @@
 			return;
 		}
 
-		window.switchEditors.go( id, $button.hasClass( 'switch-tmce' ) ? 'tmce' : 'html' );
+		try {
+			window.switchEditors.go( id, $button.hasClass( 'switch-tmce' ) ? 'tmce' : 'html' );
+		} catch ( err ) {
+			// Silently absorb selection errors during iframe editor mode switch.
+		}
 	}
 
 	/**

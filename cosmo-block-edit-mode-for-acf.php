@@ -18,7 +18,7 @@ namespace cosmo\Block_Edit_Mode_For_ACF;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION      = '1.0.3';
+const VERSION      = '1.0.4';
 const CACHE_DIR    = 'cosmo-block-edit-mode-for-acf';
 const FAILURE_FLAG = 'cosmo_block_edit_mode_for_acf_patch_failed';
 

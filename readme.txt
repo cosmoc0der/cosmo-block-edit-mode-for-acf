@@ -4,7 +4,7 @@ Tags: block editor, custom fields, blocks, inline editing, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,6 +64,9 @@ No. ACF blocks are a PRO-only feature, so there is nothing to patch in the free 
 Nothing. Deleting the plugin removes the generated cache folder in `wp-content/uploads/` and the internal flag it uses.
 
 == Changelog ==
+
+= 1.0.4 =
+* fix(blocks): prevent TinyMCE selection crash in iframe and bump block apiVersion to 3
 
 = 1.0.2 =
 * Fixed post_object, taxonomy, user, page_link and select fields inside the canvas hanging on "Searching..." and never loading a single option. ACF focuses the search box of an open dropdown by looking it up in the parent document; for a dropdown that lives in the canvas the lookup comes back empty, and the exception it raises aborts Select2 before it gets to request the results.
