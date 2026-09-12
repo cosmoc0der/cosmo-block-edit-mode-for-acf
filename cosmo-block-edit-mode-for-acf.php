@@ -3,7 +3,7 @@
  * Plugin Name:       Cosmo Block Edit Mode for ACF
  * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
  * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
- * Version:           1.0.3
+ * Version:           1.0.4
  * Requires at least: 6.8
  * Requires PHP:      7.4
  * Author:            Bakhodir Sharipov
