@@ -3,7 +3,7 @@
  * Plugin Name:       Cosmo Block Edit Mode for ACF
  * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
  * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
- * Version:           1.0.6
+ * Version:           1.0.7
  * Requires at least: 6.8
  * Requires PHP:      7.4
  * Author:            Bakhodir Sharipov
@@ -18,7 +18,7 @@ namespace cosmo\Block_Edit_Mode_For_ACF;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION      = '1.0.6';
+const VERSION      = '1.0.7';
 const CACHE_DIR    = 'cosmo-block-edit-mode-for-acf';
 const FAILURE_FLAG = 'cosmo_block_edit_mode_for_acf_patch_failed';
 
@@ -268,10 +268,18 @@ function enqueue_editor_assets() {
 		return;
 	}
 	
+	$deps = array( 'acf-blocks' );
+	
+	// The datepicker has to be patched before ACF sets up the first date field,
+	// and ACF itself only enqueues it later, on admin_enqueue_scripts.
+	if ( function_exists( 'acf_get_setting' ) && acf_get_setting( 'enqueue_datepicker' ) ) {
+		$deps[] = 'jquery-ui-datepicker';
+	}
+	
 	wp_enqueue_script(
 		'cosmo-block-edit-mode-for-acf',
 		asset_url( 'editor.js' ),
-		array( 'acf-blocks' ),
+		$deps,
 		VERSION,
 		true
 	);
@@ -322,12 +330,11 @@ function enqueue_canvas_assets() {
 	$acf_style = wp_style_is( 'acf-pro-input', 'registered' ) ? 'acf-pro-input' : 'acf-input';
 	wp_enqueue_style( $acf_style );
 	
-	$deps    = array( $acf_style );
-	$select2 = enqueue_select2_style();
-	
-	if ( $select2 ) {
-		$deps[] = $select2;
-	}
+	$deps = array_merge(
+		array( $acf_style ),
+		array_filter( array( enqueue_select2_style() ) ),
+		enqueue_picker_styles()
+	);
 	
 	wp_enqueue_style(
 		'cosmo-block-edit-mode-for-acf',
@@ -388,6 +395,37 @@ function enqueue_select2_style(): string {
 	wp_enqueue_style( 'select2', $src, array(), $version );
 	
 	return 'select2';
+}
+
+/**
+ * The datepicker and timepicker stylesheets, used by the date, date-time and time fields.
+ *
+ * The calendar is moved into the canvas along with its field (see editor.js), but
+ * ACF enqueues these from input_admin_enqueue_scripts(), too late for the canvas -
+ * the same story as enqueue_select2_style().
+ *
+ * @return string[] Style handles.
+ */
+function enqueue_picker_styles(): array {
+	if ( ! function_exists( 'acf_get_setting' ) || ! function_exists( 'acf_get_url' ) ) {
+		return array();
+	}
+	
+	$styles = array(
+		'acf-datepicker' => array( 'enqueue_datepicker', 'assets/inc/datepicker/jquery-ui.min.css', '1.11.4' ),
+		'acf-timepicker' => array( 'enqueue_datetimepicker', 'assets/inc/timepicker/jquery-ui-timepicker-addon.min.css', '1.6.1' ),
+	);
+	
+	$handles = array();
+	
+	foreach ( $styles as $handle => list( $setting, $file, $version ) ) {
+		if ( acf_get_setting( $setting ) ) {
+			wp_enqueue_style( $handle, acf_get_url( $file ), array(), $version );
+			$handles[] = $handle;
+		}
+	}
+	
+	return $handles;
 }
 
 /**

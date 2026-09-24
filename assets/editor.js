@@ -5,10 +5,10 @@
  * is once again rendered directly within the block—that is, inside the
  * editor canvas iframe.
  *
- * The fields themselves work fine: ACF attaches event handlers to the field's
- * `$el` rather than the `document`, so cross-document events do not interfere.
- * What needs fixing are elements that rely on coordinates, on the parent
- * document's admin classes, or on looking themselves up by id in `document`.
+ * The fields themselves mostly work: ACF attaches their event handlers to the
+ * field's `$el`. What needs fixing is whatever still counts on the parent
+ * document - handlers delegated from it, popups appended to its <body> and
+ * positioned against its window, lookups by id or selector in it.
  */
 ( function ( $ ) {
 	'use strict';
@@ -41,9 +41,8 @@
 	}
 
 	/**
-	 * Registers a canvas document and binds the handlers that WordPress itself
-	 * delegates from the parent `document` (or `document.body`), and which
-	 * therefore never see a click made inside the iframe.
+	 * Registers a canvas document and binds what the form expects to receive
+	 * through the parent document, which events from the iframe never reach.
 	 *
 	 * @param {Document} doc
 	 * @return {void}
@@ -55,11 +54,116 @@
 
 		canvases.push( doc );
 
-		// wp-admin/js/editor.js binds these to the parent document.
-		$( doc ).on( 'click', '.wp-switch-editor', onSwitchEditor );
+		$( doc )
+			.on( 'click mousedown change', relay )
+			.on( 'click', '.wp-switch-editor', onSwitchEditor )
+			.on( 'click', '.insert-media', onInsertMedia )
+			.on( 'keydown keyup', onShiftKey )
+			.on( 'sortstart sortstop', onSort );
+	}
 
-		// wp-includes/js/media-editor.js binds this to the parent body.
-		$( doc ).on( 'click', '.insert-media', onInsertMedia );
+	/**
+	 * Hands a canvas event to the jQuery handlers of the parent document, the way
+	 * it would bubble up to them if the form was not in an iframe.
+	 *
+	 * A good deal of what the form relies on is delegated from there: the accordion
+	 * toggle and the other global ACF models, every legacy acf.model /
+	 * acf.field.extend() handler, and the "Are you sure?" and Flexible Content
+	 * popups and the jQuery UI datepicker closing on an outside click.
+	 *
+	 * Handlers delegated from the parent <body> stay out of reach: jQuery only
+	 * matches their selectors against descendants of that <body>.
+	 *
+	 * @param {Event} e
+	 * @return {void}
+	 */
+	function relay( e ) {
+		// Wrapping the jQuery event rather than the native one keeps those ACF fires
+		// itself through .trigger( 'change' ), which have no native counterpart.
+		var event = $.Event( e );
+
+		// The selector engine keeps the document of its last query, and matching
+		// delegated selectors against the parent one only works while that is it.
+		// Any query on the canvas - $( e.target ).closest(), say - switches it over.
+		$.find.matchesSelector( document.documentElement, 'html' );
+
+		$.event.dispatch.call( document, event );
+	}
+
+	/**
+	 * Holding Shift swaps the repeater's "add row" icon for "duplicate row".
+	 *
+	 * ACF toggles the class behind that on the parent <body>, while the rows it
+	 * styles are in the canvas.
+	 *
+	 * @param {Event} e
+	 * @return {void}
+	 */
+	function onShiftKey( e ) {
+		if ( 16 === e.keyCode && this.body ) {
+			$( this.body ).toggleClass( 'acf-keydown-shift', 'keydown' === e.type );
+		}
+	}
+
+	/**
+	 * jQuery UI's sortstart/sortstop, which ACF turns into actions of the same name
+	 * from the parent document. Without them a dragged repeater or Flexible Content
+	 * row is never unmounted and remounted, which is what keeps its WYSIWYG editors
+	 * from coming out of the drop blank.
+	 *
+	 * @param {Event}  e
+	 * @param {Object} ui
+	 * @return {void}
+	 */
+	function onSort( e, ui ) {
+		acf.doAction( e.type, ui.item, ui.placeholder );
+	}
+
+	/**
+	 * Runs a function with `$( window )` measuring the given window instead.
+	 *
+	 * ACF and Select2 position their popups against `$( window )` - always the
+	 * parent one - while taking the target's offsets from the canvas, so whether
+	 * there is room above or below is answered for the wrong viewport. Replaying
+	 * their own code this way spares copying it.
+	 *
+	 * @param {Window}   view
+	 * @param {Function} fn
+	 * @param {Object}   context
+	 * @return {*}
+	 */
+	function inViewport( view, fn, context ) {
+		function measure( original ) {
+			return function () {
+				return original.apply( this[ 0 ] === window ? $( view ) : this, arguments );
+			};
+		}
+
+		return withWrapped( { scrollTop: measure, width: measure, height: measure }, fn, context );
+	}
+
+	/**
+	 * Runs a function with some jQuery methods wrapped for the duration of the call.
+	 *
+	 * @param {Object<string, Function>} wrappers Method name => function( original ) returning its replacement.
+	 * @param {Function}                 fn
+	 * @param {Object}                   context
+	 * @param {Array|Arguments}          [args]
+	 * @return {*}
+	 */
+	function withWrapped( wrappers, fn, context, args ) {
+		var originals = {};
+
+		$.each( wrappers, function ( name, wrap ) {
+			originals[ name ] = $.fn[ name ];
+			$.fn[ name ] = wrap( originals[ name ] );
+		} );
+
+		try {
+			return fn.apply( context, args );
+		} finally {
+			$.extend( $.fn, originals );
+		}
 	}
 
 	/**
@@ -105,7 +209,7 @@
 	} );
 
 	/**
-	 * Auto-focusing the search box of an open dropdown, plus the two corrections
+	 * Auto-focusing the search box of an open dropdown, plus the corrections
 	 * Select2 needs once its dropdown lives in a canvas document.
 	 *
 	 * The focusing part: ACF does that on `select2:open` through
@@ -141,6 +245,7 @@
 
 		adoptDropdown( select2, doc );
 		followCanvas( select2, $select );
+		adoptInfiniteScroll( select2 );
 
 		// The dropdown is appended to the end of <body>, so it is the last match;
 		// an earlier one would be the search box of a multi-select field itself.
@@ -164,10 +269,8 @@
 	 *   - AttachBody stores `dropdownParent` once, in its constructor. A form that
 	 *     is rebuilt in another document keeps pointing at the <body> it was born
 	 *     with, and drops its list into a document the field no longer belongs to.
-	 *   - _positionDropdown() measures the viewport through `$( window )`, which is
-	 *     always the parent window, while the offsets it compares against come from
-	 *     the iframe. The "is there room below?" test is answered for the wrong
-	 *     scroll position, so the list flips above the field for no reason.
+	 *   - _positionDropdown() measures the viewport through `$( window )` - see
+	 *     inViewport() - so the list flips above the field for no reason.
 	 *
 	 * @param {Object|undefined} select2 Select2 instance, as stored on the <select>.
 	 * @param {Document}         doc     Document the field currently lives in.
@@ -189,9 +292,17 @@
 			dropdown.$dropdownContainer.appendTo( dropdown.$dropdownParent );
 		}
 
+		var position = Object.getPrototypeOf( dropdown )._positionDropdown;
+
 		// An own property, so only this field's adapter is affected; Select2 keeps
 		// calling it on results:all, results:append, select and unselect.
-		dropdown._positionDropdown = positionDropdown;
+		dropdown._positionDropdown = function () {
+			var view = this.$dropdownParent[ 0 ].ownerDocument.defaultView;
+
+			if ( view ) {
+				inViewport( view, position, this );
+			}
+		};
 
 		dropdown._positionDropdown();
 		dropdown._resizeDropdown();
@@ -235,75 +346,56 @@
 	}
 
 	/**
-	 * AttachBody.prototype._positionDropdown(), measuring the viewport in the
-	 * document the dropdown was placed in rather than in the parent one.
+	 * Paging of AJAX results ("Loading more results...").
 	 *
-	 * @this {Object} The AttachBody-decorated dropdown adapter.
+	 * InfiniteScroll only loads the next page while its "Loading more" row is
+	 * attached, and checks that with $.contains( document.documentElement, ... ) -
+	 * the parent document. A row inside the canvas never passes, so the list stops
+	 * at the first page.
+	 *
+	 * append() looks the method up on the instance, so an own property covers it;
+	 * the scroll handler was bound to the original in bind(), hence the extra one.
+	 *
+	 * @param {Object|undefined} select2 Select2 instance, as stored on the <select>.
 	 * @return {void}
 	 */
-	function positionDropdown() {
-		var parent = this.$dropdownParent[ 0 ];
-		var view = parent && parent.ownerDocument && parent.ownerDocument.defaultView;
+	function adoptInfiniteScroll( select2 ) {
+		var results = select2 && select2.results;
 
-		if ( ! view ) {
+		// Not the InfiniteScroll adapter - the field has no paging to fix.
+		if ( ! results || ! results.$loadingMore || ! results.$results ) {
 			return;
 		}
 
-		var $view = $( view );
-		var isAbove = this.$dropdown.hasClass( 'select2-dropdown--above' );
-		var isBelow = this.$dropdown.hasClass( 'select2-dropdown--below' );
-		var offset = this.$container.offset();
-		var containerHeight = this.$container.outerHeight( false );
-		var dropdownHeight = this.$dropdown.outerHeight( false );
-		var viewportTop = $view.scrollTop();
-		var viewportBottom = viewportTop + $view.height();
-		var roomAbove = viewportTop < offset.top - dropdownHeight;
-		var roomBelow =
-				viewportBottom > offset.top + containerHeight + dropdownHeight;
-		var direction = null;
+		results.loadMoreIfNeeded = loadMoreIfNeeded;
 
-		// A statically positioned parent does not anchor the absolute list itself;
-		// the offsets to subtract are then its own offset parent's.
-		var $offsetParent = this.$dropdownParent;
+		results.$results
+			.off( 'scroll.cosmoBlockEditMode' )
+			.on( 'scroll.cosmoBlockEditMode', function () {
+				results.loadMoreIfNeeded();
+			} );
+	}
 
-		if ( 'static' === $offsetParent.css( 'position' ) ) {
-			$offsetParent = $offsetParent.offsetParent();
+	/**
+	 * InfiniteScroll.prototype.loadMoreIfNeeded(), checking the row against the
+	 * document it actually lives in.
+	 *
+	 * @this {Object} The InfiniteScroll-decorated results adapter.
+	 * @return {void}
+	 */
+	function loadMoreIfNeeded() {
+		var row = this.$loadingMore[ 0 ];
+
+		if ( this.loading || ! row || ! row.isConnected ) {
+			return;
 		}
 
-		var parentOffset = ( $offsetParent.length && $offsetParent.offset() ) || {
-			top: 0,
-			left: 0,
-		};
+		var currentOffset = this.$results.offset().top + this.$results.outerHeight( false );
+		var loadingMoreOffset = this.$loadingMore.offset().top + this.$loadingMore.outerHeight( false );
 
-		if ( ! isAbove && ! isBelow ) {
-			direction = 'below';
+		if ( currentOffset + 50 >= loadingMoreOffset ) {
+			this.loadMore();
 		}
-
-		if ( ! roomBelow && roomAbove && ! isAbove ) {
-			direction = 'above';
-		} else if ( ! roomAbove && roomBelow && isAbove ) {
-			direction = 'below';
-		}
-
-		var css = {
-			left: offset.left - parentOffset.left,
-			top: offset.top + containerHeight - parentOffset.top,
-		};
-
-		if ( 'above' === direction || ( isAbove && 'below' !== direction ) ) {
-			css.top = offset.top - parentOffset.top - dropdownHeight;
-		}
-
-		if ( direction ) {
-			this.$dropdown
-				.removeClass( 'select2-dropdown--below select2-dropdown--above' )
-				.addClass( 'select2-dropdown--' + direction );
-			this.$container
-				.removeClass( 'select2-container--below select2-container--above' )
-				.addClass( 'select2-container--' + direction );
-		}
-
-		this.$dropdownContainer.css( css );
 	}
 
 	/**
@@ -319,48 +411,171 @@
 	 * @return {void}
 	 */
 	function closeSelect2( $el ) {
-		if ( ! foreignDocument( $el ) ) {
-			return;
+		if ( foreignDocument( $el ) ) {
+			closeLists( $el );
 		}
-
-		$el.find( 'select' ).each( function () {
-			var select2 = $( this ).data( 'select2' );
-
-			if ( select2 && 'function' === typeof select2.close ) {
-				select2.close();
-			}
-		} );
 	}
 
 	acf.addAction( 'unmount', closeSelect2 );
 
 	/**
-	 * Tooltips and deletion confirmations ("Are you sure?" for repeater rows)
-	 * ACF appends these to the parent document's <body> and positions them
-	 * based on the target's offset(). For targets inside an iframe, we move
-	 * the tooltip into the iframe as well and recalculate its position.
+	 * Closing open lists on a mousedown outside of them.
+	 *
+	 * Select2 does that from a handler on the parent <body>, which only sees
+	 * mousedowns made in the parent document and only looks for open lists there.
+	 * Mousedowns inside a list never get this far - Select2 stops them on the
+	 * dropdown - and those from the canvas arrive through relay().
+	 *
+	 * @param {Event} e
+	 * @return {void}
 	 */
-	var newTooltip = acf.newTooltip;
+	function onOutsideMousedown( e ) {
+		var own = $( e.target ).closest( '.select2' )[ 0 ];
 
-	acf.newTooltip = function ( props ) {
-		var tooltip = newTooltip.apply( this, arguments );
-
-		if ( ! tooltip || ! tooltip.$el || ! tooltip.$el.length ) {
-			return tooltip;
-		}
-
-		var doc = foreignDocument( tooltip.get( 'target' ) );
-
-		if ( doc && doc.body ) {
-			doc.body.appendChild( tooltip.$el[ 0 ] );
-
-			if ( 'function' === typeof tooltip.position ) {
-				tooltip.position();
+		[ document ].concat( canvases ).forEach( function ( doc ) {
+			if ( doc.defaultView ) {
+				closeLists( $( doc ), own );
 			}
-		}
+		} );
+	}
 
-		return tooltip;
-	};
+	$( document ).on( 'mousedown', onOutsideMousedown );
+
+	/**
+	 * @param {jQuery}       $root  Where to look for the fields.
+	 * @param {Element|void} except Select2 container to leave open.
+	 * @return {void}
+	 */
+	function closeLists( $root, except ) {
+		$root.find( 'select' ).each( function () {
+			var select2 = $( this ).data( 'select2' );
+
+			if (
+				select2 &&
+				'function' === typeof select2.isOpen &&
+				select2.isOpen() &&
+				select2.$container[ 0 ] !== except
+			) {
+				select2.close();
+			}
+		} );
+	}
+
+	/**
+	 * Tooltips, deletion confirmations ("Are you sure?" for repeater rows) and the
+	 * Flexible Content layout popups.
+	 *
+	 * ACF appends all of them to the parent <body> and positions them from the
+	 * target's offset() - taken in the canvas - and `$( window )`. For a target in
+	 * the canvas the popup is moved in there and positioned again. Flexible Content
+	 * creates its popups directly rather than through acf.newTooltip(), so this has
+	 * to happen in the constructor they all share.
+	 */
+	if ( acf.models && acf.models.Tooltip ) {
+		var initializeTooltip = acf.models.Tooltip.prototype.initialize;
+
+		acf.models.Tooltip.prototype.initialize = function () {
+			initializeTooltip.apply( this, arguments );
+
+			var doc = foreignDocument( this.get( 'target' ) );
+
+			if ( doc && doc.body && doc.defaultView ) {
+				doc.body.appendChild( this.$el[ 0 ] );
+				inViewport( doc.defaultView, this.position, this );
+			}
+		};
+	}
+
+	/**
+	 * The jQuery UI datepicker behind the date, date-time and time fields.
+	 *
+	 * For an input in the canvas it never opened at all: the private
+	 * datepicker_getZindex() climbs the input's ancestors until it meets
+	 * `document` - the parent one - so it runs past the canvas <html>, asks the
+	 * canvas document for its styles and jQuery throws. The z-index it is after
+	 * does not matter here, ACF sets its own with !important.
+	 *
+	 * Past that, it has a single calendar for the whole page, kept in the parent
+	 * <body>, and places it at the input's offset() - a canvas one. The calendar is
+	 * therefore moved to whichever document the input being opened belongs to,
+	 * together with the .acf-ui-datepicker wrapper its styles are scoped to.
+	 */
+	if ( $.datepicker ) {
+		var showDatepicker = $.datepicker._showDatepicker;
+		var checkOffset = $.datepicker._checkOffset;
+
+		$.datepicker._showDatepicker = function ( input ) {
+			var doc = ( input.target || input ).ownerDocument;
+			var $calendar = $.datepicker.dpDiv;
+			var $wrapper = $calendar.parent( '.acf-ui-datepicker' );
+			var node = ( $wrapper.length ? $wrapper : $calendar )[ 0 ];
+
+			if ( doc && doc.body && node && node.ownerDocument !== doc ) {
+				doc.body.appendChild( node );
+			}
+
+			if ( ! doc || doc === document ) {
+				return showDatepicker.apply( this, arguments );
+			}
+
+			return withWrapped( { css: skipDocuments }, showDatepicker, this, arguments );
+		};
+
+		$.datepicker._checkOffset = function ( inst ) {
+			var input = inst.input && inst.input[ 0 ];
+			var doc = input && input.ownerDocument;
+
+			return doc && doc !== document
+				? checkCanvasOffset.apply( this, arguments )
+				: checkOffset.apply( this, arguments );
+		};
+	}
+
+	/**
+	 * @param {Function} original $.fn.css
+	 * @return {Function}
+	 */
+	function skipDocuments( original ) {
+		return function () {
+			return this[ 0 ] && 9 === this[ 0 ].nodeType ? undefined : original.apply( this, arguments );
+		};
+	}
+
+	/**
+	 * $.datepicker._checkOffset() - keeping the calendar inside the viewport - with
+	 * the viewport taken from the input's document instead of the parent one.
+	 *
+	 * @this {Object} $.datepicker
+	 * @param {Object}  inst
+	 * @param {Object}  offset
+	 * @param {boolean} isFixed
+	 * @return {Object}
+	 */
+	function checkCanvasOffset( inst, offset, isFixed ) {
+		var doc = inst.input[ 0 ].ownerDocument;
+		var $doc = $( doc );
+		var dpWidth = inst.dpDiv.outerWidth();
+		var dpHeight = inst.dpDiv.outerHeight();
+		var inputWidth = inst.input.outerWidth();
+		var inputHeight = inst.input.outerHeight();
+		var viewWidth = doc.documentElement.clientWidth + ( isFixed ? 0 : $doc.scrollLeft() );
+		var viewHeight = doc.documentElement.clientHeight + ( isFixed ? 0 : $doc.scrollTop() );
+
+		offset.left -= this._get( inst, 'isRTL' ) ? dpWidth - inputWidth : 0;
+		offset.left -= isFixed && offset.left === inst.input.offset().left ? $doc.scrollLeft() : 0;
+		offset.top -= isFixed && offset.top === inst.input.offset().top + inputHeight ? $doc.scrollTop() : 0;
+
+		offset.left -= Math.min(
+			offset.left,
+			offset.left + dpWidth > viewWidth && viewWidth > dpWidth ? Math.abs( offset.left + dpWidth - viewWidth ) : 0
+		);
+		offset.top -= Math.min(
+			offset.top,
+			offset.top + dpHeight > viewHeight && viewHeight > dpHeight ? Math.abs( dpHeight + inputHeight ) : 0
+		);
+
+		return offset;
+	}
 
 	/**
 	 * The WYSIWYG field.
@@ -480,6 +695,9 @@
 	/**
 	 * Visual/Text tabs.
 	 *
+	 * wp-admin/js/editor.js listens for them on the parent document through
+	 * tinymce.$ rather than jQuery, which relay() cannot reach.
+	 *
 	 * @param {Event} e
 	 * @return {void}
 	 */
@@ -503,6 +721,8 @@
 	/**
 	 * The "Add Media" button of a WYSIWYG field. The modal itself belongs to the
 	 * parent document, which is exactly where wp.media puts it.
+	 *
+	 * wp-includes/js/media-editor.js delegates it from the parent <body> - see relay().
 	 *
 	 * @param {Event} e
 	 * @return {void}

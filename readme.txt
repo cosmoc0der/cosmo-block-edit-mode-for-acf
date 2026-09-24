@@ -4,7 +4,7 @@ Tags: block editor, custom fields, blocks, inline editing, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.6
+Stable tag: 1.0.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,8 +65,23 @@ Nothing. Deleting the plugin removes the generated cache folder in `wp-content/u
 
 == Changelog ==
 
+= 1.0.7 =
+* Fixed AJAX-driven fields inside the canvas never loading past the first page of results. Select2 only requests the next page while its "Loading more results..." row is attached, and checks that against the parent document, so for a list living in the canvas the row never counted as attached.
+* Fixed date, date-time and time fields inside the canvas never opening their calendar. jQuery UI walks up from the input looking for a z-index until it meets the parent document, runs past the canvas one instead and throws. The calendar is now also moved into the canvas and kept inside its viewport, closes on a click elsewhere, and gets its stylesheets there.
+* Fixed accordions inside the canvas not opening, and everything else ACF delegates from the parent document not reacting to the canvas - legacy `acf.model` / `acf.field.extend()` handlers included. Canvas clicks, mousedowns and changes are now handed on to the parent document's jQuery handlers.
+* Fixed Select2 lists, the "Are you sure?" confirmation and the Flexible Content popups staying open on a click elsewhere in the canvas, and Select2 lists in the canvas staying open on a click outside of it.
+* Fixed the Flexible Content "add layout" and layout actions popups appearing away from their button. They were created bypassing `acf.newTooltip()`, so they stayed in the parent document; every ACF tooltip is now moved into the canvas and positioned against the canvas viewport, so it also flips below its target near the top edge like it should.
+* Fixed WYSIWYG fields in a dragged repeater or Flexible Content row coming out blank. jQuery UI's `sortstart` / `sortstop` never reached ACF, so the row was not unmounted and remounted around the drag.
+* Fixed holding Shift not switching the repeater's "add row" icon to "duplicate row" inside the canvas.
+
 = 1.0.4 =
 * fix(blocks): prevent TinyMCE selection crash in iframe and bump block apiVersion to 3
+
+= 1.0.3 =
+* Fixed the Select2 dropdown of a field inside the canvas opening above the field and drifting away from it. Select2 measures the viewport through the parent window while taking the field's coordinates from the canvas, so it decided there was no room below where there was plenty; it also repositioned on the parent window's scroll only, leaving the list behind when the canvas scrolled.
+* Fixed a dropdown left floating over the canvas after the block switched to preview. ACF tears Select2 down from its `remove` handler, which a block form never reaches - it is unmounted, and the list lives outside the node React drops.
+* Fixed the block form rendering in the theme's font at the theme's size. ACF's stylesheets expect the wp-admin body font; inside the canvas what they inherit is the editor typography the theme puts on `<body>`, which Select2 - having no font of its own - picked up as well.
+* Stopped adding the canvas stylesheets to the editor page itself. `enqueue_block_assets` fires in both places, and on the editor page everything the form needs is already loaded, while the TinyMCE skin added there a second time only got in the way.
 
 = 1.0.2 =
 * Fixed post_object, taxonomy, user, page_link and select fields inside the canvas hanging on "Searching..." and never loading a single option. ACF focuses the search box of an open dropdown by looking it up in the parent document; for a dropdown that lives in the canvas the lookup comes back empty, and the exception it raises aborts Select2 before it gets to request the results.
