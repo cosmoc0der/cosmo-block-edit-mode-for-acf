@@ -8,6 +8,10 @@ on:
       - '.wordpress-org/**'
       - 'readme.txt'
 
+# Both workflows commit to the same SVN repository; running them side by side
+# makes the later commit fail with a conflict on trunk/readme.txt.
+concurrency: wporg-svn
+
 jobs:
   assets:
     runs-on: ubuntu-latest

@@ -5,6 +5,10 @@ on:
     tags:
       - '*'
 
+# Both workflows commit to the same SVN repository; running them side by side
+# makes the later commit fail with a conflict on trunk/readme.txt.
+concurrency: wporg-svn
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
