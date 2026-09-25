@@ -674,6 +674,38 @@
 
 			return initializeEditor.apply( this, arguments );
 		};
+
+		var enableTinymce = acf.tinymce.enableTinymce;
+
+		/**
+		 * Re-creating a WYSIWYG editor without pulling the focus to it.
+		 *
+		 * A block unmounts and remounts its form whenever its index changes - that
+		 * is, whenever a block is added or removed above it, Enter and Delete
+		 * included - and ACF brings the destroyed editor back through
+		 * switchEditors.go(). That call bookmarks the caret into the textarea content,
+		 * and wp-admin/js/editor.js focuses the bookmark and scrolls to it as soon as
+		 * TinyMCE is ready, so the author is thrown to the block they were not
+		 * working on. Only the part of switchEditors.go() that brings a destroyed
+		 * editor back is needed here.
+		 *
+		 * @param {string} id
+		 * @return {boolean}
+		 */
+		acf.tinymce.enableTinymce = function ( id ) {
+			if (
+				'undefined' === typeof tinymce ||
+				tinymce.get( id ) ||
+				! acf.isset( window, 'tinyMCEPreInit', 'mceInit', id )
+			) {
+				return enableTinymce.apply( this, arguments );
+			}
+
+			$( '#' + id ).show();
+			tinymce.init( tinyMCEPreInit.mceInit[ id ] );
+
+			return true;
+		};
 	}
 
 	acf.addFilter( 'wysiwyg_tinymce_settings', function ( settings, id, field ) {

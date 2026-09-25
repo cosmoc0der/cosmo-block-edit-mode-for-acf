@@ -4,7 +4,7 @@ Tags: block editor, custom fields, blocks, inline editing, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.7
+Stable tag: 1.0.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,6 +64,9 @@ No. ACF blocks are a PRO-only feature, so there is nothing to patch in the free 
 Nothing. Deleting the plugin removes the generated cache folder in `wp-content/uploads/` and the internal flag it uses.
 
 == Changelog ==
+
+= 1.0.8 =
+* Fixed the editor jumping to a block with a WYSIWYG field while working elsewhere in the post. A block remounts its form whenever a block is added or removed above it - pressing Enter or Delete does that - and ACF brings the editor back through `switchEditors.go()`, which bookmarks the caret and makes WordPress focus and scroll to it once TinyMCE is ready.
 
 = 1.0.7 =
 * Fixed AJAX-driven fields inside the canvas never loading past the first page of results. Select2 only requests the next page while its "Loading more results..." row is attached, and checks that against the parent document, so for a list living in the canvas the row never counted as attached.
