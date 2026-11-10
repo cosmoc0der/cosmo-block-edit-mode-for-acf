@@ -4,7 +4,7 @@ Tags: block editor, custom fields, blocks, inline editing, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.8
+Stable tag: 1.0.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -38,6 +38,8 @@ Turn the patch off without deactivating the plugin:
 
 `add_filter( 'cosmo/block_edit_mode_for_acf/enabled', '__return_false' );`
 
+On WordPress 7.1+ the plugin keeps blocks without an explicit block version on the legacy version (1 for `acf_register_block_type()`, 2 for block.json), because version 3 blocks have no in-block form. To opt a block into version 3, set `blockVersion` in its block.json or `acf_block_version` in `acf_register_block_type()`.
+
 == Installation ==
 
 1. Install and activate ACF PRO.
@@ -64,6 +66,10 @@ No. ACF blocks are a PRO-only feature, so there is nothing to patch in the free 
 Nothing. Deleting the plugin removes the generated cache folder in `wp-content/uploads/` and the internal flag it uses.
 
 == Changelog ==
+
+= 1.0.9 =
+* Fixed blocks opening their fields in a modal and the sidebar again on WordPress 7.1. ACF 6.6+ and Secure Custom Fields register every block that does not declare a block version as version 3 there, and version 3 has no in-block form to restore. Such blocks now keep the version they had before 7.1; a block that sets its version explicitly is left alone.
+* Hid the Secure Custom Fields notice saying the fields of legacy blocks moved to the sidebar, since with this plugin active they did not.
 
 = 1.0.8 =
 * Fixed the editor jumping to a block with a WYSIWYG field while working elsewhere in the post. A block remounts its form whenever a block is added or removed above it - pressing Enter or Delete does that - and ACF brings the editor back through `switchEditors.go()`, which bookmarks the caret and makes WordPress focus and scroll to it once TinyMCE is ready.

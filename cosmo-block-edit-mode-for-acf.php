@@ -3,7 +3,7 @@
  * Plugin Name:       Cosmo Block Edit Mode for ACF
  * Plugin URI:        https://github.com/cosmoc0der/block-edit-mode-for-acf
  * Description:       Restores the "Switch to Edit / Switch to Preview" toggle and the field form inside ACF blocks themselves, which ACF disables whenever the editor canvas is rendered in an iframe.
- * Version:           1.0.8
+ * Version:           1.0.9
  * Requires at least: 6.8
  * Requires PHP:      7.4
  * Author:            Bakhodir Sharipov
@@ -18,7 +18,7 @@ namespace cosmo\Block_Edit_Mode_For_ACF;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION      = '1.0.8';
+const VERSION      = '1.0.9';
 const CACHE_DIR    = 'cosmo-block-edit-mode-for-acf';
 const FAILURE_FLAG = 'cosmo_block_edit_mode_for_acf_patch_failed';
 
@@ -26,6 +26,8 @@ add_filter( 'script_loader_src', __NAMESPACE__ . '\filter_block_script_src', 10,
 add_action( 'enqueue_block_editor_assets', __NAMESPACE__ . '\enqueue_editor_assets', 20 );
 add_action( 'enqueue_block_assets', __NAMESPACE__ . '\enqueue_canvas_assets' );
 add_action( 'admin_notices', __NAMESPACE__ . '\render_failure_notice' );
+add_filter( 'acf/blocks/default_block_version', __NAMESPACE__ . '\default_block_version', 10, 3 );
+add_filter( 'acf/blocks/show_legacy_block_version_notice', __NAMESPACE__ . '\show_legacy_block_notice' );
 
 /**
  * Whether the patch is enabled.
@@ -37,6 +39,39 @@ add_action( 'admin_notices', __NAMESPACE__ . '\render_failure_notice' );
  */
 function is_enabled(): bool {
 	return (bool) apply_filters( 'cosmo/block_edit_mode_for_acf/enabled', true );
+}
+
+/**
+ * Keeps blocks without an explicit block version on the legacy one.
+ *
+ * Starting with WordPress 7.1, ACF 6.6+ and SCF register such blocks as version 3,
+ * which has no in-block form at all - only a modal and the sidebar - so the patch
+ * would have nothing to restore. The values are the defaults ACF used before 7.1.
+ * A block that declares its version in block.json or acf_register_block_type()
+ * is left as it is.
+ *
+ * @param int    $version Default block version.
+ * @param array  $block   Block settings.
+ * @param string $source  Registration source, `php` or `json`.
+ * @return int
+ */
+function default_block_version( $version, $block, $source ) {
+	if ( (int) $version < 3 || ! is_enabled() ) {
+		return $version;
+	}
+
+	return 'php' === $source ? 1 : 2;
+}
+
+/**
+ * The SCF notice about legacy blocks says their fields moved to the sidebar,
+ * which is exactly what this plugin undoes.
+ *
+ * @param bool $show Whether to show the notice.
+ * @return bool
+ */
+function show_legacy_block_notice( $show ) {
+	return $show && ! is_enabled();
 }
 
 /**
