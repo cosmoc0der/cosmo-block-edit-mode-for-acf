@@ -4,7 +4,7 @@ Tags: block editor, custom fields, blocks, inline editing, editor
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.9
+Stable tag: 1.0.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,9 @@ No. ACF blocks are a PRO-only feature, so there is nothing to patch in the free 
 Nothing. Deleting the plugin removes the generated cache folder in `wp-content/uploads/` and the internal flag it uses.
 
 == Changelog ==
+
+= 1.0.10 =
+* Fixed a fatal error on older ACF versions (6.6.2 among them), which pass the block version filter only two arguments.
 
 = 1.0.9 =
 * Fixed blocks opening their fields in a modal and the sidebar again on WordPress 7.1. ACF 6.6+ and Secure Custom Fields register every block that does not declare a block version as version 3 there, and version 3 has no in-block form to restore. Such blocks now keep the version they had before 7.1; a block that sets its version explicitly is left alone.
